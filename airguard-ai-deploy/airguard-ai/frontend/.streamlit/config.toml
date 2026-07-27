@@ -1,0 +1,12 @@
+[theme]
+# Warm, earthy industrial palette: brown base, green/yellow accents.
+# Red is deliberately kept OUT of the general theme and reserved only for
+# "unsafe" risk status in the app itself (lib/theme.py) — in a gas-safety
+# platform, red needs to stay a rare, unambiguous danger signal, not a
+# general UI accent color.
+base = "dark"
+primaryColor = "#E8B923"
+backgroundColor = "#211609"
+secondaryBackgroundColor = "#3A2A16"
+textColor = "#F3E9D2"
+font = "sans serif"

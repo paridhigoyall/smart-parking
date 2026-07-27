@@ -1,0 +1,14 @@
+# Optional — only needed for the computer vision module (app/services/vision/).
+# Install separately: pip install -r requirements-vision.txt
+#
+# This pulls in PyTorch and is large (~5-6GB installed). For a much smaller
+# footprint, install the CPU-only PyTorch build first:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+# then install this file — pip will see torch is already satisfied and skip
+# pulling the much larger default (CUDA-enabled) build.
+ultralytics==8.4.102
+opencv-python==5.0.0.93
+
+# ultralytics pulls in a newer numpy than the core requirements.txt pins;
+# both are compatible with everything else in this project (verified).
+numpy==2.5.1

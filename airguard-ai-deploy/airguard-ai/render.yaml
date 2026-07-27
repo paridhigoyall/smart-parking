@@ -1,0 +1,168 @@
+# Render Blueprint — deploys the whole stack (backend, Postgres, Redis,
+# Celery worker, frontend) from one file via Render's "New > Blueprint".
+#
+# Honest note: this follows Render's documented Blueprint spec, but I
+# could not actually deploy it from this environment to confirm it end to
+# end (render.com isn't reachable from here) — verify the first deploy
+# carefully against DEPLOYMENT.md's checklist rather than assuming it's
+# flawless on the first try. The Docker images and migration/startup
+# commands it references ARE the same ones already tested locally.
+#
+# https://render.com/docs/blueprint-spec
+
+databases:
+  - name: airguard-db
+    plan: free
+    databaseName: airguard_ai
+    user: airguard
+
+services:
+  # ------------------------------------------------------------------
+  # Redis — Celery broker + result backend
+  # ------------------------------------------------------------------
+  - type: redis
+    name: airguard-redis
+    plan: free
+    ipAllowList: []   # internal-only, only Render services in this project can reach it
+
+  # ------------------------------------------------------------------
+  # Backend API — runs migrations on boot (see backend/Dockerfile CMD),
+  # then starts uvicorn.
+  # ------------------------------------------------------------------
+  - type: web
+    name: airguard-backend
+    env: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DEBUG
+        value: "false"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: FIRST_SUPERUSER_EMAIL
+        sync: false          # set this yourself in the Render dashboard
+      - key: FIRST_SUPERUSER_PASSWORD
+        sync: false          # set this yourself — don't leave the sample default in production
+      - key: POSTGRES_SERVER
+        fromDatabase: { name: airguard-db, property: host }
+      - key: POSTGRES_PORT
+        fromDatabase: { name: airguard-db, property: port }
+      - key: POSTGRES_USER
+        fromDatabase: { name: airguard-db, property: user }
+      - key: POSTGRES_PASSWORD
+        fromDatabase: { name: airguard-db, property: password }
+      - key: POSTGRES_DB
+        fromDatabase: { name: airguard-db, property: database }
+      - key: REDIS_HOST
+        fromService: { type: redis, name: airguard-redis, property: host }
+      - key: REDIS_PORT
+        fromService: { type: redis, name: airguard-redis, property: port }
+      - key: CELERY_TASK_ALWAYS_EAGER
+        value: "false"
+      # CORS — set to your deployed frontend's actual URL after its first
+      # deploy (Render assigns the URL, so this is a manual follow-up, not
+      # something this blueprint can know in advance).
+      - key: BACKEND_CORS_ORIGINS
+        sync: false
+      # Notification delivery — all optional, leave unset to run with
+      # those channels harmlessly "skipped" rather than failing.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM_NUMBER
+        sync: false
+      - key: FCM_ACCESS_TOKEN
+        sync: false
+      - key: FCM_PROJECT_ID
+        sync: false
+      - key: WEATHER_API_KEY
+        sync: false
+      - key: WEATHER_SITE_LAT
+        sync: false
+      - key: WEATHER_SITE_LON
+        sync: false
+
+  # ------------------------------------------------------------------
+  # Celery worker — same image as the backend, different start command.
+  # Without this service, alerts still get created but never delivered
+  # over email/SMS/push (dashboard-only) until a worker is running.
+  # ------------------------------------------------------------------
+  - type: worker
+    name: airguard-celery-worker
+    env: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    dockerCommand: celery -A app.worker worker --loglevel=info
+    plan: free
+    envVars:
+      - key: SECRET_KEY
+        fromService: { type: web, name: airguard-backend, envVarKey: SECRET_KEY }
+      - key: POSTGRES_SERVER
+        fromDatabase: { name: airguard-db, property: host }
+      - key: POSTGRES_PORT
+        fromDatabase: { name: airguard-db, property: port }
+      - key: POSTGRES_USER
+        fromDatabase: { name: airguard-db, property: user }
+      - key: POSTGRES_PASSWORD
+        fromDatabase: { name: airguard-db, property: password }
+      - key: POSTGRES_DB
+        fromDatabase: { name: airguard-db, property: database }
+      - key: REDIS_HOST
+        fromService: { type: redis, name: airguard-redis, property: host }
+      - key: REDIS_PORT
+        fromService: { type: redis, name: airguard-redis, property: port }
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM_NUMBER
+        sync: false
+      - key: FCM_ACCESS_TOKEN
+        sync: false
+      - key: FCM_PROJECT_ID
+        sync: false
+
+  # ------------------------------------------------------------------
+  # Frontend — Streamlit. API_BASE_URL is read at container RUNTIME (see
+  # frontend/lib/api_client.py), so this can be updated later without a
+  # rebuild if the backend's URL ever changes.
+  #
+  # NOTE: Render's Blueprint spec has no way to append "/api/v1" onto a
+  # linked service's URL via YAML alone, so this has to be set manually
+  # after the backend's first deploy — set it in the Render dashboard to
+  # https://<your-backend-service-name>.onrender.com/api/v1
+  # ------------------------------------------------------------------
+  - type: web
+    name: airguard-frontend
+    env: docker
+    dockerfilePath: ./frontend/Dockerfile
+    dockerContext: ./frontend
+    plan: free
+    envVars:
+      - key: API_BASE_URL
+        sync: false   # e.g. https://airguard-backend.onrender.com/api/v1

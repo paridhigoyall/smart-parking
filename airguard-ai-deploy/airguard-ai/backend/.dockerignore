@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.env
+.git/
+.pytest_cache/
+*.egg-info/
+# ml_models/*.joblib is intentionally NOT excluded here — the README
+# promises a pre-trained model ships by default, and excluding it would
+# silently break /ml/classify and /ml/model-info in production. If you'd
+# rather train fresh at deploy time instead, add it back here and add a
+# release-phase step that runs `python -m app.ml.train_risk_classifier`.

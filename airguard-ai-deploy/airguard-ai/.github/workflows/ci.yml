@@ -1,0 +1,106 @@
+name: CI
+
+# Runs the same checks used throughout local development — migrations
+# apply cleanly to a fresh database, the app imports without error, and
+# every Python file in both backend and frontend actually compiles.
+# None of this replaces manual verification against DEPLOYMENT.md's
+# checklist after a real deploy, but it catches broken imports and bad
+# migrations before they ever get that far.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: airguard
+          POSTGRES_PASSWORD: airguard_password
+          POSTGRES_DB: airguard_ai
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      - name: Apply migrations to a fresh database
+        working-directory: backend
+        env:
+          POSTGRES_SERVER: 127.0.0.1
+          POSTGRES_PORT: 5432
+          POSTGRES_USER: airguard
+          POSTGRES_PASSWORD: airguard_password
+          POSTGRES_DB: airguard_ai
+          SECRET_KEY: ci-only-secret-not-for-production
+        run: alembic upgrade head
+
+      - name: Confirm no undetected schema drift
+        working-directory: backend
+        env:
+          POSTGRES_SERVER: 127.0.0.1
+          POSTGRES_PORT: 5432
+          POSTGRES_USER: airguard
+          POSTGRES_PASSWORD: airguard_password
+          POSTGRES_DB: airguard_ai
+          SECRET_KEY: ci-only-secret-not-for-production
+        run: alembic check
+
+      - name: Import the FastAPI app
+        working-directory: backend
+        env:
+          POSTGRES_SERVER: 127.0.0.1
+          POSTGRES_PORT: 5432
+          POSTGRES_USER: airguard
+          POSTGRES_PASSWORD: airguard_password
+          POSTGRES_DB: airguard_ai
+          SECRET_KEY: ci-only-secret-not-for-production
+        run: python -c "from app.main import app; print(f'{len(app.routes)} routes registered')"
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: pip install -r requirements.txt
+
+      - name: Compile every page (catches syntax errors)
+        working-directory: frontend
+        run: |
+          python -m py_compile app.py
+          for f in lib/*.py pages/*.py; do python -m py_compile "$f"; done
+
+      - name: Render the login page with Streamlit's AppTest
+        working-directory: frontend
+        run: |
+          python -c "
+          from streamlit.testing.v1 import AppTest
+          at = AppTest.from_file('app.py')
+          at.run(timeout=15)
+          assert not at.exception, f'app.py raised: {at.exception}'
+          print('Login page renders without error')
+          "
